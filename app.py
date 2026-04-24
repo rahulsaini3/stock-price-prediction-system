@@ -11,14 +11,6 @@ from plotly.subplots import make_subplots
 import warnings
 warnings.filterwarnings('ignore')
 
-try:
-    from tensorflow.keras.models import Sequential
-    from tensorflow.keras.layers import LSTM, Dense, Dropout
-    from tensorflow.keras.callbacks import EarlyStopping
-    TENSORFLOW_AVAILABLE = True
-except ImportError:
-    TENSORFLOW_AVAILABLE = False
-
 COMPANIES = {
     "Reliance Industries":       "RELIANCE.NS",
     "Tata Consultancy Services": "TCS.NS",
@@ -192,16 +184,10 @@ with st.sidebar:
 
     st.markdown('<div class="sec-title">AI Engine Configuration</div>', unsafe_allow_html=True)
     seq_len = st.slider("Sequence Length", 30, 120, 60)
-
-    if TENSORFLOW_AVAILABLE:
-        epochs   = st.slider("Epochs", 10, 60, 25)
-        use_lstm = st.checkbox("Enable LSTM Model", value=True)
-    else:
-        st.markdown('<div class="info-box" style="border-color:#F23645">TensorFlow missing.<br>Run: pip install tensorflow</div>', unsafe_allow_html=True)
-        use_lstm = False; epochs = 25
+    use_lstm = False
+    epochs = 25
 
     st.markdown("<br>", unsafe_allow_html=True)
-    # BIGGER BUTTON
     run_btn = st.button("🚀 RUN AI PREDICTION")
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -231,24 +217,13 @@ def add_indicators(df):
     df['Return'] = df['Close'].pct_change()*100
     return df
 
-def prepare_sequences(data, sl):
-    X,y = [],[]
-    for i in range(len(data)-sl): X.append(data[i:i+sl]); y.append(data[i+sl])
-    return np.array(X), np.array(y)
-
-def build_lstm(sl):
-    m = Sequential([LSTM(64,return_sequences=True,input_shape=(sl,1)),Dropout(0.2),
-                    LSTM(64,return_sequences=False),Dropout(0.2),Dense(32,activation='relu'),Dense(1)])
-    m.compile(optimizer='adam',loss='mean_squared_error'); return m
-
 def metric_card(label, value, color=""):
     return f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value {color}">{value}</div></div>'
 
 def get_tv_symbol(ticker):
     return TV_MAP.get(ticker, ticker)
 
-# ═════════════════════════════ TABS REORDERED ═════════════════════════════════
-# TAB 1 IS NOW AI PREDICTION SO IT OPENS BY DEFAULT
+# ═════════════════════════════ TABS ═══════════════════════════════════════════
 tab1, tab2, tab3 = st.tabs(["🤖 AI Forecast", "📊 Live Chart", "📈 Technicals"])
 
 # ══════════════════════════ TAB 1: AI PREDICTION ══════════════════════════════
@@ -289,11 +264,11 @@ with tab1:
         st.markdown(f'<div class="sec-title">{company_label} ({selected_ticker})</div>', unsafe_allow_html=True)
         c1,c2,c3,c4,c5 = st.columns(5)
         arrow = "▲" if price_change >= 0 else "▼"; clr = "g" if price_change >= 0 else "r"
-        c1.markdown(metric_card("Last Price", f"{current_price:.2f}"),             unsafe_allow_html=True)
+        c1.markdown(metric_card("Last Price", f"{current_price:.2f}"),              unsafe_allow_html=True)
         c2.markdown(metric_card("Change",     f"{arrow} {abs(pct_change):.2f}%", clr), unsafe_allow_html=True)
-        c3.markdown(metric_card("52W High",   f"{high_52w:.2f}", "g"),             unsafe_allow_html=True)
-        c4.markdown(metric_card("52W Low",    f"{low_52w:.2f}",  "r"),             unsafe_allow_html=True)
-        c5.markdown(metric_card("RSI",        f"{df['RSI'].iloc[-1]:.1f}"),         unsafe_allow_html=True)
+        c3.markdown(metric_card("52W High",   f"{high_52w:.2f}", "g"),              unsafe_allow_html=True)
+        c4.markdown(metric_card("52W Low",    f"{low_52w:.2f}",  "r"),              unsafe_allow_html=True)
+        c5.markdown(metric_card("RSI",        f"{df['RSI'].iloc[-1]:.1f}"),          unsafe_allow_html=True)
 
         close  = df['Close'].values.reshape(-1,1)
         scaler = MinMaxScaler((0,1)); scaled = scaler.fit_transform(close)
@@ -304,46 +279,14 @@ with tab1:
         X_lr = np.arange(len(close)).reshape(-1,1); lr = LinearRegression()
         lr.fit(X_lr[:split], close[:split]); lr_pred = lr.predict(X_lr[split:])
         lr_rmse = np.sqrt(mean_squared_error(close[split:], lr_pred))
-        prog.progress(35, text="Linear Regression complete.")
-
-        lstm_pred_prices = lstm_rmse = lstm_forecast = None
-        if use_lstm and TENSORFLOW_AVAILABLE:
-            tr = scaled[:split]; ts = scaled[split:]
-            if len(tr) > seq_len+10:
-                prog.progress(40, text="Preparing tensor sequences...")
-                Xtr,ytr = prepare_sequences(tr,seq_len); Xts,yts = prepare_sequences(ts,seq_len)
-                Xtr = Xtr.reshape(-1,seq_len,1); Xts = Xts.reshape(-1,seq_len,1)
-                prog.progress(50, text="Training LSTM Neural Network...")
-                m = build_lstm(seq_len)
-                es = EarlyStopping(patience=5, restore_best_weights=True)
-                m.fit(Xtr,ytr,epochs=epochs,batch_size=32,validation_split=0.1,callbacks=[es],verbose=0)
-                prog.progress(80, text="Generating future trajectory...")
-                ps = np.array(m.predict(Xts,batch_size=32,verbose=0)).reshape(-1,1)
-                lstm_pred_prices = scaler.inverse_transform(ps)
-                actual = scaler.inverse_transform(yts.reshape(-1,1))
-                lstm_rmse = np.sqrt(mean_squared_error(actual,lstm_pred_prices))
-                lseq = scaled[-seq_len:].reshape(1,seq_len,1); fl=[]; cs=lseq.copy()
-                for _ in range(forecast_days):
-                    p = float(np.array(m.predict(cs,batch_size=1,verbose=0)).flatten()[0])
-                    fl.append(p); cs = np.append(cs[:,1:,:],[[[p]]],axis=1)
-                lstm_forecast = scaler.inverse_transform(np.array(fl).reshape(-1,1)).flatten()
-
         prog.progress(90, text="Rendering visual output...")
+
         tdates = df.index[split:]
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(x=df.index[:split],y=close[:split].flatten(),name='Training',line=dict(color='#787B86',width=1)))
         fig2.add_trace(go.Scatter(x=tdates,y=close[split:].flatten(),name='Actual',line=dict(color='#FFFFFF',width=2)))
         fig2.add_trace(go.Scatter(x=tdates,y=lr_pred.flatten(),name=f'LinReg RMSE:{lr_rmse:.2f}',line=dict(color='#2962FF',width=2,dash='dash')))
-        if lstm_pred_prices is not None:
-            ldates = tdates[seq_len:]
-            fig2.add_trace(go.Scatter(x=ldates,y=lstm_pred_prices.flatten(),name=f'LSTM RMSE:{lstm_rmse:.2f}',line=dict(color='#FFD000',width=2.5)))
-            ldate = df.index[-1]; fdates = pd.date_range(ldate+pd.Timedelta(days=1),periods=forecast_days,freq='B')
-            fig2.add_trace(go.Scatter(x=list(fdates)+list(fdates[::-1]),
-                y=list(lstm_forecast*1.03)+list(lstm_forecast[::-1]*0.97),
-                fill='toself',fillcolor='rgba(255, 208, 0, 0.1)',line=dict(color='rgba(0,0,0,0)'),showlegend=False))
-            fig2.add_trace(go.Scatter(x=fdates,y=lstm_forecast,name=f'{forecast_days}d Forecast',
-                line=dict(color='#FFD000',width=3,dash='dot'),mode='lines+markers',marker=dict(size=4,color='#FFD000')))
-        
+
         fig2.update_layout(height=650,plot_bgcolor='#131722',paper_bgcolor='#131722',
             title=dict(text='Machine Learning Price Forecast',font=dict(color='#D1D4DC',family='Inter',size=14)),
             font=dict(color='#787B86',family='Roboto Mono',size=11),
@@ -357,20 +300,9 @@ with tab1:
         st.markdown('<div class="sec-title">Model Evaluation</div>', unsafe_allow_html=True)
         m1,m2,m3 = st.columns(3)
         m1.markdown(metric_card("LinReg Error",f"{lr_rmse:.2f}"),unsafe_allow_html=True)
-        if lstm_rmse:
-            m2.markdown(metric_card("LSTM Error",f"{lstm_rmse:.2f}","g" if lstm_rmse<lr_rmse else ""),unsafe_allow_html=True)
-            imp = ((lr_rmse-lstm_rmse)/lr_rmse)*100
-            m3.markdown(metric_card("Delta",f"{imp:.1f}%","g" if imp>0 else "r"),unsafe_allow_html=True)
-            if lstm_forecast is not None:
-                st.markdown('<div class="sec-title">Forecast Statistics</div>', unsafe_allow_html=True)
-                fa,fb,fc = st.columns(3)
-                fa.markdown(metric_card("Target Start",f"{lstm_forecast[0]:.2f}"),unsafe_allow_html=True)
-                fb.markdown(metric_card("Target End",f"{lstm_forecast[-1]:.2f}"),unsafe_allow_html=True)
-                fv = ((lstm_forecast[-1]-current_price)/current_price)*100
-                fc.markdown(metric_card(f"{forecast_days}d Return",f"{'+' if fv>=0 else ''}{fv:.1f}%","g" if fv>=0 else "r"),unsafe_allow_html=True)
-        else:
-            m2.markdown(metric_card("LSTM Error","N/A"),unsafe_allow_html=True)
-            m3.markdown(metric_card("Delta","N/A"),unsafe_allow_html=True)
+        m2.markdown(metric_card("LSTM Error","N/A"),unsafe_allow_html=True)
+        m3.markdown(metric_card("Delta","N/A"),unsafe_allow_html=True)
+
     else:
         st.markdown("""
         <div style="text-align:center;padding:4rem;background:#1E222D;border-radius:4px;border:1px solid #2A2E39;margin-top:1rem">
@@ -418,30 +350,22 @@ with tab3:
         if df2 is not None:
             fig3 = make_subplots(rows=4,cols=1,shared_xaxes=True,
                                  row_heights=[0.55,0.15,0.15,0.15],vertical_spacing=0.03)
-            # Bollinger Bands
             fig3.add_trace(go.Scatter(x=df2.index,y=df2['BB_Up'],line=dict(color='rgba(41,98,255,0.3)',width=1),showlegend=False),row=1,col=1)
             fig3.add_trace(go.Scatter(x=df2.index,y=df2['BB_Dn'],fill='tonexty',fillcolor='rgba(41,98,255,0.05)',line=dict(color='rgba(41,98,255,0.3)',width=1),showlegend=False,name='BB'),row=1,col=1)
-            
-            # Candles
             fig3.add_trace(go.Candlestick(x=df2.index,open=df2['Open'],high=df2['High'],low=df2['Low'],close=df2['Close'],
                 name='Price',increasing=dict(fillcolor='#22AB94',line=dict(color='#22AB94',width=1)),
                 decreasing=dict(fillcolor='#F23645',line=dict(color='#F23645',width=1))),row=1,col=1)
-            
             for ma,col in [('MA20','#2962FF'),('MA50','#FFD000'),('MA100','#E040FB'),('MA200','#FF5252')]:
                 fig3.add_trace(go.Scatter(x=df2.index,y=df2[ma],name=ma,line=dict(color=col,width=1.2),opacity=0.85),row=1,col=1)
-            
             vc = ['#22AB94' if c>=o else '#F23645' for c,o in zip(df2['Close'],df2['Open'])]
             fig3.add_trace(go.Bar(x=df2.index,y=df2['Volume'],marker_color=vc,opacity=0.6,showlegend=False),row=2,col=1)
-            
             fig3.add_trace(go.Scatter(x=df2.index,y=df2['RSI'],name='RSI',line=dict(color='#E040FB',width=1.5)),row=3,col=1)
             fig3.add_hline(y=70,line_dash='dash',line_color='#787B86',line_width=1,row=3,col=1)
             fig3.add_hline(y=30,line_dash='dash',line_color='#787B86',line_width=1,row=3,col=1)
-            
             mc2 = ['#22AB94' if v>=0 else '#F23645' for v in (df2['MACD']-df2['Signal'])]
             fig3.add_trace(go.Bar(x=df2.index,y=df2['MACD']-df2['Signal'],marker_color=mc2,opacity=0.8,showlegend=False),row=4,col=1)
             fig3.add_trace(go.Scatter(x=df2.index,y=df2['MACD'],name='MACD',line=dict(color='#2962FF',width=1.2)),row=4,col=1)
             fig3.add_trace(go.Scatter(x=df2.index,y=df2['Signal'],name='Signal',line=dict(color='#FFD000',width=1.2)),row=4,col=1)
-            
             fig3.update_layout(height=850,plot_bgcolor='#131722',paper_bgcolor='#131722',
                 font=dict(color='#787B86',family='Roboto Mono',size=11),
                 xaxis_rangeslider_visible=False,
