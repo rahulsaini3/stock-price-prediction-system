@@ -193,7 +193,7 @@ with st.sidebar:
 
 # ═══════════════════════════════ MAIN ═════════════════════════════════════════
 st.markdown('<div class="main-title">AI <span>Prediction Terminal</span></div>', unsafe_allow_html=True)
-st.markdown('<div class="main-sub">Final Year Project: Stock Market Forecasting using Machine Learning</div>', unsafe_allow_html=True)
+
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ── Helper Functions ──────────────────────────────────────────────────────────
